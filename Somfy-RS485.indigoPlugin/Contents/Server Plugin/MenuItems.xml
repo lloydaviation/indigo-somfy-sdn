@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<MenuItems>
+    <MenuItem id="discoverMotors">
+        <Name>Discover Somfy Motors (scan bus)</Name>
+        <CallbackMethod>discoverMotors</CallbackMethod>
+    </MenuItem>
+</MenuItems>

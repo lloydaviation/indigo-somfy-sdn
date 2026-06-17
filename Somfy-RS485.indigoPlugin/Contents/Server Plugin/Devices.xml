@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Devices>
+
+    <!-- ===== GATEWAY: a "Somfy Bus" owns ONE USB-RS485 dongle. Multiple allowed. ===== -->
+    <Device type="custom" id="somfyBus">
+        <Name>Somfy Bus (RS485)</Name>
+        <ConfigUI>
+            <Field id="serialPort" type="serialport">
+                <Label>USB RS485 dongle:</Label>
+            </Field>
+            <Field id="masterAddress" type="textfield" default="">
+                <Label>Controller (MASTER) NodeID — leave blank for default 7F:7F:7F. (Just the
+                       sender's ID; keep it different from any other controller on the bus,
+                       e.g. the Autellis at FF:FF:EE.)</Label>
+            </Field>
+            <Field id="baud" type="textfield" default="4800" hidden="true"/>
+        </ConfigUI>
+        <States>
+            <State id="status">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Bus Status</TriggerLabel>
+                <ControlPageLabel>Bus Status</ControlPageLabel>
+            </State>
+        </States>
+        <UiDisplayStateId>status</UiDisplayStateId>
+    </Device>
+
+    <!-- ===== ROLLER SHADE: one per motor (NodeID). dimmer = position slider + on/off. ===== -->
+    <Device type="dimmer" id="rollerShade">
+        <Name>Somfy Roller Shade</Name>
+        <ConfigUI>
+            <Field id="busId" type="menu">
+                <Label>Somfy Bus:</Label>
+                <List class="self" filter="" method="gatewayList" dynamicReload="true"/>
+            </Field>
+            <Field id="motorPick" type="menu">
+                <Label>Motor:</Label>
+                <List class="self" filter="" method="discoveredMotorList" dynamicReload="true"/>
+                <Description>Run "Plugins &#9656; Somfy SDN &#9656; Discover Somfy Motors" first to populate this list.</Description>
+            </Field>
+            <Field id="motorAddress" type="textfield" visibleBindingId="motorPick" visibleBindingValue="__manual__">
+                <Label>Motor NodeID (from the motor label, e.g. 12:34:56):</Label>
+            </Field>
+            <Field id="address" type="textfield" hidden="true"/>
+        </ConfigUI>
+        <States>
+            <State id="windowState">
+                <ValueType>
+                    <List>
+                        <Option value="open">Open</Option>
+                        <Option value="closed">Closed</Option>
+                        <Option value="moving">Moving</Option>
+                        <Option value="partial">Partial</Option>
+                        <Option value="blocked">Blocked</Option>
+                    </List>
+                </ValueType>
+                <TriggerLabel>Window State</TriggerLabel>
+                <ControlPageLabel>Window State</ControlPageLabel>
+            </State>
+            <State id="positionPercent"><ValueType>Number</ValueType>
+                <TriggerLabel>Position %</TriggerLabel><ControlPageLabel>Position %</ControlPageLabel></State>
+            <State id="atIP"><ValueType>Number</ValueType>
+                <TriggerLabel>At IP (index, -1=none)</TriggerLabel><ControlPageLabel>At IP</ControlPageLabel></State>
+        </States>
+        <UiDisplayStateId>windowState</UiDisplayStateId>
+    </Device>
+
+    <!-- ===== GROUP: an SDN hardware group (GroupID). One frame moves all members. ===== -->
+    <!-- dimmer so it gets open(on)/close(off)/set-% too; brightness is COMMAND-ONLY
+         (a group has no unified position report — member shade devices self-update). -->
+    <Device type="dimmer" id="shadeGroup">
+        <Name>Somfy Shade Group</Name>
+        <ConfigUI>
+            <Field id="busId" type="menu">
+                <Label>Somfy Bus:</Label>
+                <List class="self" filter="" method="gatewayList" dynamicReload="true"/>
+            </Field>
+            <Field id="groupAddress" type="textfield">
+                <Label>Group address (GroupID, NodeID format, e.g. 01:01:00):</Label>
+            </Field>
+            <Field id="address" type="textfield" hidden="true"/>
+        </ConfigUI>
+    </Device>
+
+</Devices>

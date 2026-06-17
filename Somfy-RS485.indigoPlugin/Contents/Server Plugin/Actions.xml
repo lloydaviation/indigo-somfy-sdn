@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Actions>
+    <!-- Open/Close/Stop/SetPosition apply to both shades and groups -->
+    <Action id="open" deviceFilter="self">
+        <Name>Open (up)</Name>
+        <CallbackMethod>actionOpen</CallbackMethod>
+    </Action>
+    <Action id="close" deviceFilter="self">
+        <Name>Close (down)</Name>
+        <CallbackMethod>actionClose</CallbackMethod>
+    </Action>
+    <Action id="stop" deviceFilter="self">
+        <Name>Stop</Name>
+        <CallbackMethod>actionStop</CallbackMethod>
+    </Action>
+    <Action id="setPosition" deviceFilter="self">
+        <Name>Set Position (%)</Name>
+        <CallbackMethod>actionSetPosition</CallbackMethod>
+        <ConfigUI>
+            <Field id="percent" type="textfield" default="50">
+                <Label>Position % (0-100):</Label>
+            </Field>
+        </ConfigUI>
+    </Action>
+    <!-- Query is per-motor only (preset/IP recall: deferred until captured) -->
+    <Action id="queryPosition" deviceFilter="self.rollerShade">
+        <Name>Query Position</Name>
+        <CallbackMethod>actionQueryPosition</CallbackMethod>
+    </Action>
+</Actions>

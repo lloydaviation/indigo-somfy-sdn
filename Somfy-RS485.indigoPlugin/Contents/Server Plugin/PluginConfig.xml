@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Serial port + MASTER NodeID now live on each Somfy Bus device (a bus owns its dongle).
+     Plugin-wide prefs only. -->
+<PluginConfig>
+    <Field id="invertPosition" type="checkbox" default="false">
+        <Label>Invert position (set if Indigo "open" ends up commanding the motor closed —
+               SDN %-vs-open polarity depends on each motor's configured rotation direction)</Label>
+    </Field>
+    <Field id="showDebugInfo" type="checkbox" default="false">
+        <Label>Debug logging (log every frame in/out as hex)</Label>
+    </Field>
+</PluginConfig>
