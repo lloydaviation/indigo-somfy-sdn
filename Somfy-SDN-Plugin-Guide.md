@@ -1,7 +1,7 @@
 # Somfy SDN (RS485) — Indigo Plugin
 ## Installation & Operation Guide
 
-*Plugin version 0.1.0 · Brian Lloyd (lloyd.aero) · for Indigo Domotics*
+*Plugin version 1.0.0 · Brian Lloyd (lloyd.aero) · for Indigo Domotics*
 
 ---
 

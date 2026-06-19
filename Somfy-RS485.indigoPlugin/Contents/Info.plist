@@ -2,13 +2,22 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleDisplayName</key>      <string>Somfy SDN (RS485)</string>
-    <key>CFBundleIdentifier</key>       <string>aero.lloyd.indigoplugin.somfy-sdn</string>
-    <key>PluginVersion</key>            <string>0.1.0</string>
-    <!-- ServerApiVersion 3.0 = Indigo 2022.1+ (Python 3). Confirm against the SDK
-         Info.plist you build against; later releases bump the minor. -->
-    <key>ServerApiVersion</key>         <string>3.0</string>
-    <key>CFBundleVersion</key>          <string>0.1.0</string>
-    <key>NSHumanReadableCopyright</key> <string>Copyright © 2026 Brian Lloyd (lloyd.aero). MIT License.</string>
+    <key>PluginVersion</key>
+    <string>1.0.0</string>
+    <key>ServerApiVersion</key>
+    <string>3.0</string>
+    <key>CFBundleDisplayName</key>
+    <string>Somfy SDN (RS485)</string>
+    <key>CFBundleIdentifier</key>
+    <string>aero.lloyd.indigoplugin.somfy-sdn</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.0</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>https://github.com/lloydaviation/indigo-somfy-sdn</string>
+        </dict>
+    </array>
 </dict>
 </plist>
