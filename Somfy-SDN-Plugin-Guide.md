@@ -1,7 +1,7 @@
 # Somfy SDN (RS485) — Indigo Plugin
 ## Installation & Operation Guide
 
-*Plugin version 1.0.0 · Brian Lloyd (lloyd.aero) · for Indigo Domotics*
+*Plugin version 1.0.2 · Brian Lloyd (lloyd.aero) · for Indigo Domotics*
 
 ---
 
@@ -17,6 +17,9 @@ SC100SDN. It provides:
   changes made at a wall remote.
 - **Closed-loop reliability** — a command that doesn't move the motor (e.g. a bus collision) is
   detected and automatically reissued.
+- **Self-healing serial link** — recovers automatically from USB/serial drops (power glitches, hub
+  brown-outs) with no manual reload, tracks a reconnect count for trend monitoring, and can
+  email/text you if a fault persists.
 
 The plugin **commands** motors that have already been configured (limits, rotation, group
 membership) by an external SDN tool. It does **not** yet program motors — see §9.
@@ -76,7 +79,10 @@ the plugin replaces it for everyday control.
 2. **USB RS485 dongle:** select the adapter's serial port.
 3. **Controller (MASTER) NodeID:** leave blank for the default **`7F:7F:7F`**. Only change it if a
    different live controller on the bus already uses that address.
-4. Save. The device auto-names **`SomfySDN1`** (rename it if you wish — whatever you choose is
+4. **Alert when the serial link has been down this many seconds:** how long a serial outage must
+   persist before the plugin fires the **"Somfy bus offline"** event (§8). Default **300 s**; set it
+   lower for faster alerting. (Leave it alone if you don't use the alert.)
+5. Save. The device auto-names **`SomfySDN1`** (rename it if you wish — whatever you choose is
    remembered and **pre-selected** when you create shade and group devices). Create one bus per
    adapter; multiple buses are supported.
 
@@ -137,12 +143,20 @@ Every motor has a 3-byte **NodeID** (e.g. `06:64:AB`). To read them off the bus:
   action.
 - **Stop** — the **Stop** action.
 - **Status** — while a shade travels the plugin polls it ~2×/second and the position tracks live;
-  when idle it re-syncs every **30 s**, so a change made at a wall remote appears within ~30 s. The
+  when idle it re-syncs every **5 s**, so a change made at a wall remote appears within ~5 s. The
   **Window State** shows *open / closed / partial / moving*; the **Position %** state reports how far
   **closed** the shade is (the complement of the slider's % open).
 - **Reliability** — every position command is checked against the motor's reported motion. If a
   command produced *no* movement (e.g. a collision swallowed it), the plugin reissues it
   automatically; after repeated failures it marks the shade *blocked*.
+- **Serial-link recovery** — if the USB/serial link drops (a power glitch, a hub brown-out, an
+  unplugged adapter), the bus detects it within ~5 s, reopens the port automatically, and resumes —
+  no plugin reload. The bus device's **Status** shows *connected / reconnecting / offline*, and its
+  **Reconnects** count and **Last Reconnect** time let a trigger warn you when reconnects start
+  climbing (a dongle, cable, or power feed going bad before it fails outright).
+- **Offline alert** — if the link stays down past the bus device's threshold (§5), the plugin fires
+  a **"Somfy bus offline"** trigger event. To get an email or text: **New Trigger → Type: _Somfy SDN
+  (RS485)_ event → _Somfy bus offline_ → Action: Send Email and SMS** (or your Email+ action).
 - **Groups** — a group device is **command-only**: a hardware group has no single position to
   report. Its member shade devices each show their own position and re-sync on the periodic scan.
 

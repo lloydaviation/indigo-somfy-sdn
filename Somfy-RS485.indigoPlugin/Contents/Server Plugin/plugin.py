@@ -35,6 +35,7 @@ class Bus(object):
     REPLY_WINDOW = 0.35            # max wait for a unicast poll reply (SDN Trep <= 255ms) + margin
     DISCOVER_WINDOW = 0.8          # longer window to collect several colliding broadcast replies
     FRAME_GAP = 0.004              # idle gap that delimits an inbound frame (Tfree<3ms)
+    REOPEN_BACKOFF = 3.0           # after a serial failure/absence, retry opening the dongle at most this often (s)
 
     def __init__(self, plugin, dev):
         self.plugin = plugin
@@ -51,6 +52,10 @@ class Bus(object):
             self.master = sdn.parse_node_id(mval) if mval else sdn.MASTER_DEFAULT
         except Exception:
             self.master = sdn.MASTER_DEFAULT
+        try:                                                   # per-bus: escalate after the link is down this long (s)
+            self.notify_after = max(5.0, float(props.get("notifyAfterSec", 300) or 300))
+        except (TypeError, ValueError):
+            self.notify_after = 300.0
         self.ser = None
         self.outq = queue.Queue()
         self.children = {}         # NodeID tuple -> indigo device id (rollerShade inbound routing)
@@ -58,18 +63,115 @@ class Bus(object):
         self._last_tx = None       # bytes of our most recent TX, for half-duplex echo/collision check
         self._disc = None          # discovery collector {'addrs':set,'labels':dict} while scanning
         self._stop = threading.Event()
+        self._healthy = True       # False while the serial link is disrupted/absent (drives auto-reconnect)
+        self._reconnects = 0       # successful recoveries this session (reliability trend)
+        self._down_since = None    # monotonic when the link went down (escalation clock)
+        self._notified = False     # fired the "bus offline" event for the CURRENT outage episode?
+        self._reopen_after = 0.0   # monotonic gate; rate-limits reopen attempts to REOPEN_BACKOFF
 
-    # ---- open / close ----
+    # ---- open / close / auto-reconnect ----
+    def _open_serial(self):
+        """Create the pyserial handle (Somfy SDN = 4800 8-O-1). Shared by open() and _reconnect()."""
+        self.ser = serial.Serial(self.port, self.baud, bytesize=serial.EIGHTBITS,
+                                 parity=serial.PARITY_ODD, stopbits=serial.STOPBITS_ONE,
+                                 timeout=0.05)
+
     def open(self):
         if not self.port:
             raise ValueError("no serial port selected — edit the Somfy Bus device and choose the "
                              "PL2303 dongle in the 'USB RS485 dongle' field")
-        self.ser = serial.Serial(self.port, self.baud, bytesize=serial.EIGHTBITS,
-                                 parity=serial.PARITY_ODD, stopbits=serial.STOPBITS_ONE,
-                                 timeout=0.05)
         self._stop.clear()
+        self._healthy = True
+        self._down_since = None
+        self._notified = False
+        self._reopen_after = 0.0
+        try:
+            self._open_serial()
+        except Exception as ex:                       # dongle absent at startup -> start anyway, reconnect later
+            self.ser = None
+            self._go_unhealthy("serial not present at startup (%s): %s" % (self.port, ex))
+            self._reopen_after = time.monotonic() + self.REOPEN_BACKOFF
         threading.Thread(target=self._io_loop, name="somfy-io-%d" % self.devId,
                          daemon=True).start()
+
+    def _set_status(self, status, err=None):
+        """Reflect link state on the bus device (best-effort; called from the io_loop thread)."""
+        try:
+            dev = indigo.devices[self.devId]
+            dev.updateStateOnServer("status", status)
+            if err is not None:
+                dev.setErrorStateOnServer(err)
+        except Exception:
+            pass
+
+    def _reconnect(self):
+        """Close the dead handle and try to reopen the SAME port. Runs ONLY on the _io_loop thread
+        (all serial I/O does), so no lock. Rate-limited by REOPEN_BACKOFF. Returns True if open;
+        recovery is announced by _mark_recovered() once a transaction (or an idle reopen) confirms it."""
+        if self._stop.is_set():
+            return False
+        if self.ser is not None:
+            try:
+                self.ser.close()
+            except Exception:
+                pass
+            self.ser = None
+        now = time.monotonic()
+        if now < self._reopen_after:
+            return False
+        self._reopen_after = now + self.REOPEN_BACKOFF
+        try:
+            self._open_serial()
+            return True
+        except Exception as ex:
+            self._go_unhealthy("serial down (%s): %s" % (self.port, ex))
+            return False
+
+    # ---- link health: detect (loud, once) -> escalate if sustained -> recover (loud, once) ----
+    def _go_unhealthy(self, why):
+        """Edge into the disrupted state. Logs the DETECT once per episode; starts the escalation clock."""
+        if not self._healthy:
+            return
+        self._healthy = False
+        self._down_since = time.monotonic()
+        self._notified = False
+        self.plugin.logger.warning("%s: %s — reconnecting" % (self.name, why))
+        self._set_status("reconnecting", err="serial down")
+
+    def _maybe_notify(self):
+        """If the link has stayed down past the threshold, escalate ONCE to the operator (fire the
+        'bus offline' event -> the user's Send Email/SMS trigger). Keeps retrying regardless."""
+        if self._healthy or self._notified or self._down_since is None:
+            return
+        if (time.monotonic() - self._down_since) < self.notify_after:
+            return
+        self._notified = True
+        self.plugin.logger.error("%s: serial still down after %.0f s — escalating to operator (email/SMS)"
+                                 % (self.name, self.notify_after))
+        self._set_status("offline", err="serial fault")
+        try:
+            self.plugin.fire_bus_offline(self)
+        except Exception:
+            self.plugin.logger.exception("%s: error firing offline event" % self.name)
+
+    def _mark_recovered(self):
+        """Edge back to healthy (a transaction succeeded, or an idle reopen after a down). Logs the
+        RECOVER once + bumps the reconnect counter / device states (the reliability trend)."""
+        if self._healthy:
+            return
+        self._healthy = True
+        self._down_since = None
+        self._notified = False
+        self._reconnects += 1
+        self.plugin.logger.info("%s: serial recovered on %s (reconnect #%d this session)"
+                                % (self.name, self.port, self._reconnects))
+        self._set_status("connected", err="")
+        try:
+            dev = indigo.devices[self.devId]
+            dev.updateStateOnServer("reconnectCount", self._reconnects)
+            dev.updateStateOnServer("lastReconnect", time.strftime("%Y-%m-%d %H:%M:%S"))
+        except Exception:
+            pass
 
     def close(self):
         self._stop.set()
@@ -114,26 +216,50 @@ class Bus(object):
         on the first complete reply."""
         self.outq.put((frame, expect_reply, multi))
 
+    def _do_io(self, frame, expect_reply, multi):
+        """One transaction on the wire: clear stale RX, write, flush, optionally read the reply.
+        Serial errors propagate to _io_loop, which reconnects and retries."""
+        if self.plugin.debug:
+            self.plugin.logger.debug("%s TX %s" % (self.name, sdn.hexs(frame)))
+        try:
+            self.ser.reset_input_buffer()                  # drop stale bytes before the request
+        except Exception:
+            pass
+        self.ser.write(frame)
+        self.ser.flush()                                   # block until TX is on the wire (turnaround)
+        if expect_reply:
+            self._read_reply(self.DISCOVER_WINDOW if multi else self.REPLY_WINDOW,
+                             until_first=not multi)
+
     def _io_loop(self):
         while not self._stop.is_set():
             try:
                 frame, expect_reply, multi = self.outq.get(timeout=0.2)
             except queue.Empty:
+                if not self._healthy or self.ser is None:  # idle + disrupted -> keep trying to heal the link
+                    if self._reconnect():
+                        self._mark_recovered()             # idle reopen after a down = recovery
+                    else:
+                        self._maybe_notify()               # still down -> escalate if it's been too long
                 continue
             try:
-                if self.plugin.debug:
-                    self.plugin.logger.debug("%s TX %s" % (self.name, sdn.hexs(frame)))
+                if self.ser is None and not self._reconnect():
+                    self._maybe_notify()
+                    continue                               # still down -> drop (reconcile/operator re-issues)
                 try:
-                    self.ser.reset_input_buffer()          # drop stale bytes before the request
-                except Exception:
-                    pass
-                self.ser.write(frame)
-                self.ser.flush()                           # block until TX is on the wire (turnaround)
-                if expect_reply:
-                    self._read_reply(self.DISCOVER_WINDOW if multi else self.REPLY_WINDOW,
-                                     until_first=not multi)
-            except Exception:
-                self.plugin.logger.exception("%s: I/O error" % self.name)
+                    self._do_io(frame, expect_reply, multi)
+                    if not self._healthy:                  # a transaction went through while disrupted -> recovered
+                        self._mark_recovered()
+                except Exception:                          # USB dropped (power glitch, hub brown-out, unplug)
+                    self._go_unhealthy("serial I/O error")
+                    if self._reconnect():                  # device may already be back -> retry this frame once
+                        try:
+                            self._do_io(frame, expect_reply, multi)
+                            self._mark_recovered()
+                        except Exception:
+                            self._maybe_notify()
+                    else:
+                        self._maybe_notify()
             finally:
                 self.outq.task_done()
             self._stop.wait(self.INTER_CMD)                # pace the bus (>= Treq 25ms)
@@ -145,11 +271,7 @@ class Bus(object):
         last = time.monotonic()
         deadline = last + window
         while not self._stop.is_set() and time.monotonic() < deadline:
-            try:
-                chunk = self.ser.read(64)
-            except Exception:
-                self.plugin.logger.exception("%s: RX error" % self.name)
-                return
+            chunk = self.ser.read(64)                      # a serial error here propagates -> _io_loop reconnects
             now = time.monotonic()
             if chunk:
                 buf.extend(chunk)
@@ -208,7 +330,9 @@ class Plugin(indigo.PluginBase):
                                # "2Hz stream" under the Autelis was IT polling, not unsolicited).
     STALL_TIME = 2.5           # if the encoder (pulses) hasn't moved for this long, motion has stopped
     MAX_REISSUE = 3            # reissue a command that produced NO motion this many times, then block
-    IDLE_RESYNC = 30.0         # s between idle position re-syncs (startup + external-move catch)
+    IDLE_RESYNC = 5.0          # s between idle polls — also the keepalive: detects a serial drop within
+                               # ~5s (vs up to 30) so the down-timestamp + escalation are prompt. Mains-
+                               # powered motors + unchanged-value state updates make the load negligible.
 
     def __init__(self, pluginId, pluginDisplayName, pluginVersion, pluginPrefs):
         super().__init__(pluginId, pluginDisplayName, pluginVersion, pluginPrefs)
@@ -225,11 +349,33 @@ class Plugin(indigo.PluginBase):
         self._reissue = {}         # devId -> count of no-motion reissues toward the current target
         self._lastpoll = {}        # devId -> monotonic of last poll (fast while moving, slow when idle)
         self.debug = pluginPrefs.get("showDebugInfo", False)
+        self.triggers = {}         # trigger.id -> trigger (for the "Somfy bus offline" notification event)
 
     # ---- prefs ----
     def closedPrefsConfigUi(self, valuesDict, userCancelled):
         if not userCancelled:
             self.debug = valuesDict.get("showDebugInfo", False)
+
+    # ---- event triggers: fire "Somfy bus offline" so the operator's Trigger (-> Send Email/SMS) runs ----
+    def triggerStartProcessing(self, trigger):
+        self.triggers[trigger.id] = trigger
+
+    def triggerStopProcessing(self, trigger):
+        self.triggers.pop(trigger.id, None)
+
+    def fire_bus_offline(self, bus):
+        fired = 0
+        for trig in list(self.triggers.values()):
+            try:
+                if trig.pluginTypeId == "busOffline":
+                    indigo.trigger.execute(trig)
+                    fired += 1
+            except Exception:
+                self.logger.exception("error executing busOffline trigger")
+        if fired == 0:
+            self.logger.warning("%s is offline, but no 'Somfy bus offline' trigger exists to notify you — "
+                                "create one (New Trigger -> Type: Somfy SDN (RS485) Event -> Somfy bus "
+                                "offline -> action: Send Email and SMS) to get alerts." % bus.name)
 
     # ---- ConfigUI dynamic list: the parent-bus picker for sub-devices ----
     def gatewayList(self, filter="", valuesDict=None, typeId="", targetId=0):
@@ -353,9 +499,9 @@ class Plugin(indigo.PluginBase):
                 bus = Bus(self, dev)
                 bus.open()
                 self.buses[dev.id] = bus
-                dev.updateStateOnServer("status", "connected")
-                self.logger.info("%s: SDN bus open on %s @ 4800 8-O-1"
-                                 % (dev.name, bus.port))
+                dev.updateStateOnServer("status", "connected" if bus._healthy else "reconnecting")
+                self.logger.info("%s: SDN bus on %s @ 4800 8-O-1 (%s)"
+                                 % (dev.name, bus.port, "connected" if bus._healthy else "reconnecting"))
                 for childId in self.orphans.pop(dev.id, set()):   # attach early-started children
                     c = indigo.devices[childId]
                     if c.enabled:

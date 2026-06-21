@@ -14,12 +14,27 @@
                        e.g. the Autellis at FF:FF:EE.)</Label>
             </Field>
             <Field id="baud" type="textfield" default="4800" hidden="true"/>
+            <Field id="notifyAfterSec" type="textfield" default="300">
+                <Label>Alert when the serial link has been DOWN this many seconds — fires the
+                       "Somfy bus offline" event so a Trigger can email/text you (min 5; set low,
+                       e.g. 30, to test the escalation):</Label>
+            </Field>
         </ConfigUI>
         <States>
             <State id="status">
                 <ValueType>String</ValueType>
                 <TriggerLabel>Bus Status</TriggerLabel>
                 <ControlPageLabel>Bus Status</ControlPageLabel>
+            </State>
+            <State id="reconnectCount">
+                <ValueType>Integer</ValueType>
+                <TriggerLabel>Serial Reconnect Count</TriggerLabel>
+                <ControlPageLabel>Reconnects</ControlPageLabel>
+            </State>
+            <State id="lastReconnect">
+                <ValueType>String</ValueType>
+                <TriggerLabel>Last Serial Reconnect</TriggerLabel>
+                <ControlPageLabel>Last Reconnect</ControlPageLabel>
             </State>
         </States>
         <UiDisplayStateId>status</UiDisplayStateId>

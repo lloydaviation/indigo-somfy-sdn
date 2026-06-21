@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<!-- Plugin-defined trigger events. The operator creates a Trigger of this type and attaches a
+     "Send Email and SMS" (or Email+) action; the plugin fires it via indigo.trigger.execute(). -->
+<Events>
+    <Event id="busOffline">
+        <Name>Somfy bus offline (serial fault)</Name>
+    </Event>
+</Events>

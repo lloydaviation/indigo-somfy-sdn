@@ -12,6 +12,9 @@ dedicated controller such as the Autelis SC100SDN.
   at a wall remote.
 - **Closed-loop reliability** — a command that doesn't move the motor (e.g. a bus collision) is
   detected and reissued automatically.
+- **Self-healing serial link** — recovers automatically from USB/serial drops (power glitches, hub
+  brown-outs) with no manual reload, tracks a reconnect count for trend monitoring, and can
+  email/text you if a fault persists.
 
 The plugin **commands** motors that have already been configured (limits, rotation, groups) by an
 external SDN tool; it does not yet *program* motors — a future version will add that.
@@ -33,6 +36,7 @@ external SDN tool; it does not yet *program* motors — a future version will ad
 ## Documentation
 
 Full setup and operation: **[Somfy-SDN-Plugin-Guide.md](Somfy-SDN-Plugin-Guide.md)**.
+Release history: **[CHANGELOG.md](CHANGELOG.md)**.
 
 ## License
 
