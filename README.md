@@ -14,7 +14,7 @@ dedicated controller such as the Autelis SC100SDN.
   detected and reissued automatically.
 - **Self-healing serial link** — recovers automatically from USB/serial drops (power glitches, hub
   brown-outs) with no manual reload, tracks a reconnect count for trend monitoring, and can
-  email/text you if a fault persists.
+  email/text you if a fault persists (via a one-time notification trigger you create — see the Guide).
 
 The plugin **commands** motors that have already been configured (limits, rotation, groups) by an
 external SDN tool; it does not yet *program* motors — a future version will add that.

@@ -88,6 +88,24 @@ the plugin replaces it for everyday control.
 
 The Indigo log should show `… SDN bus open on /dev/cu.… @ 4800 8-O-1`.
 
+### Get alerted if the bus goes offline (recommended)
+
+The plugin detects a serial drop and **recovers on its own** — but to be *told* when a fault won't
+clear (a dead adapter, a pulled cable, lost hub power), you must create **one Indigo trigger.**
+Without it, a sustained outage is recorded only in the Indigo log; nothing reaches you. To wire up
+email/text:
+
+1. **Triggers → New Trigger.**
+2. **Type:** *Somfy SDN (RS485)* event → **Somfy bus offline (serial fault)**.
+3. **Conditions:** leave it on **Always** — the event itself is the trigger.
+4. **Actions:** add **Send Email and SMS** (or your **Email+** action); set the recipient and a
+   message such as *"Somfy shade bus offline — check the USB adapter and its power."*
+5. Name the trigger and **Save.**
+
+The event fires **once per outage**, as soon as the link has been down longer than the bus device's
+threshold (step 4 above). To prove it end to end, set that threshold low (say 30 s), unplug the
+adapter for a minute, and confirm the message arrives — then set the threshold back to taste.
+
 ---
 
 ## 6. Get the motor addresses from the motors (discovery)
@@ -155,8 +173,8 @@ Every motor has a 3-byte **NodeID** (e.g. `06:64:AB`). To read them off the bus:
   **Reconnects** count and **Last Reconnect** time let a trigger warn you when reconnects start
   climbing (a dongle, cable, or power feed going bad before it fails outright).
 - **Offline alert** — if the link stays down past the bus device's threshold (§5), the plugin fires
-  a **"Somfy bus offline"** trigger event. To get an email or text: **New Trigger → Type: _Somfy SDN
-  (RS485)_ event → _Somfy bus offline_ → Action: Send Email and SMS** (or your Email+ action).
+  a **"Somfy bus offline"** trigger event. **You must create a trigger to receive it** — see *"Get
+  alerted if the bus goes offline"* in §5; without one, a sustained outage is only written to the log.
 - **Groups** — a group device is **command-only**: a hardware group has no single position to
   report. Its member shade devices each show their own position and re-sync on the periodic scan.
 
