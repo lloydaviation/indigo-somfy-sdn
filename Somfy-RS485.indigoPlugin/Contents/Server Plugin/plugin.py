@@ -339,8 +339,8 @@ class Plugin(indigo.PluginBase):
         self.buses = {}            # busDevId -> Bus
         self.orphans = {}          # busDevId -> set(childDevId) started before their bus
         self.discovered = {}       # busDevId -> {nodeStr: label} from the last scan
-        self._target = {}          # devId -> target percent (0=open,100=closed); set = command outstanding
-        self._reported = {}        # devId -> last VALID reported percent (0..100; for UI)
+        self._target = {}          # devId -> target POSITION 0-255 (0=open,255=closed); set = command outstanding
+        self._reported = {}        # devId -> last VALID reported POSITION 0-255 (0=open,255=closed)
         self._pulses = {}          # devId -> last reported encoder pulses (reliable motion signal)
         self._moved = {}           # devId -> True once the encoder has moved since the command
         self._progress_t = {}      # devId -> monotonic of last encoder change (motion-stopped detection)
@@ -584,6 +584,20 @@ class Plugin(indigo.PluginBase):
         bus.send(builder(src, dst))
         return True
 
+    # ---- the ONE representation rule (Brian, v1.0.3): internal state, logic, comparisons, and the
+    #      motor commands are all the 0-255 wire byte (0=open, 255=closed). Indigo brightness percent
+    #      (100=open) is a BOUNDARY representation only — _pos() converts on the way IN from an Indigo
+    #      action, _pct() converts on the way OUT to the Indigo display. Nothing else does this math.
+    @staticmethod
+    def _pos(brightness):
+        """Indigo brightness % (100=open) -> wire position 0-255 (0=open, 255=closed)."""
+        return round((100 - max(0, min(100, int(brightness)))) * 255 / 100)
+
+    @staticmethod
+    def _pct(pos):
+        """Wire position 0-255 (0=open) -> Indigo brightness % (100=open)."""
+        return round(100 - pos * 100 / 255)
+
     def _command(self, dev, brightness):
         """Issue a position command (brightness 100=open) and, for a shade, arm closed-loop
         convergence: the target is tracked and _reconcile reissues it if it stalls short. Groups
@@ -591,8 +605,7 @@ class Plugin(indigo.PluginBase):
         bus = self._bus_for(dev)
         if not bus:
             return
-        brightness = max(0, min(100, int(brightness)))
-        pos = round((100 - brightness) * 255 / 100)     # 0-255: brightness 100->0 open, 0->255 closed
+        pos = self._pos(brightness)                     # the ONE input conversion: Indigo % -> 0-255 byte
         src, dst, _ = self._endpoints(dev)
         bus.send(sdn.set_position(src, dst, pos))
         self._reflect(dev, brightness, moving=True)
@@ -666,7 +679,7 @@ class Plugin(indigo.PluginBase):
         # encoder never moved -> command was not acted on (lost) -> reissue
         n = self._reissue.get(dev.id, 0)
         if n >= self.MAX_REISSUE:
-            self.logger.error("%s: no motion after %d reissues (want %d%%) — giving up"
+            self.logger.error("%s: no motion after %d reissues (want pos %d/255) — giving up"
                               % (dev.name, n, target))
             dev.updateStateOnServer("windowState", "blocked")
             self._finish(dev)
@@ -674,17 +687,19 @@ class Plugin(indigo.PluginBase):
         self._reissue[dev.id] = n + 1
         self._cmd_t[dev.id] = now
         self._progress_t[dev.id] = now
-        self.logger.warning("%s: no motion, reissuing move to %d%% (%d/%d)"
+        self.logger.warning("%s: no motion, reissuing move to pos %d/255 (%d/%d)"
                             % (dev.name, target, n + 1, self.MAX_REISSUE))
         bus = self.buses.get(self._bus_id(dev))
         src, dst, _ = self._endpoints(dev)
-        bus.send(sdn.set_position(src, dst, round(target * 255 / 100)))
+        bus.send(sdn.set_position(src, dst, target))     # target is ALREADY 0-255 (same units as the report)
 
     def _finish(self, dev):
         for d in (self._target, self._reissue, self._moved):
             d.pop(dev.id, None)
 
-    # Indigo dimmer dispatch (slider, Set Brightness, Home/voice, On/Off) for both types
+    # Indigo dimmer dispatch (slider, Set Brightness, Home/voice, On/Off) for both types. This is the
+    # Indigo PERCENT boundary: the brightness values and deltas here are Indigo %, converted to the
+    # 0-255 byte the moment they reach _command — no percent math reaches the motor/convergence path.
     def actionControlDimmerRelay(self, action, dev):
         A = indigo.kDimmerRelayAction
         if action.deviceAction == A.SetBrightness:
@@ -715,14 +730,20 @@ class Plugin(indigo.PluginBase):
         pulses, pos = p["pulses"], p["position"]
         self._report_t[dev.id] = now
         prev = self._pulses.get(dev.id)
+        prev_pos = self._reported.get(dev.id)
         self._pulses[dev.id] = pulses
-        if prev is not None and pulses != prev:          # encoder moved => motion (reliable signal)
+        # Motion = encoder pulses changed OR reported position moved (>2/255, to ignore jitter). The
+        # position signal makes convergence robust even when the RE'd pulses field is unreliable, so a
+        # shade that is genuinely still traveling is never mistaken for "stalled" and reissued early.
+        moved = (prev is not None and pulses != prev) or \
+                (prev_pos is not None and abs(pos - prev_pos) > 2)
+        if moved:
             self._progress_t[dev.id] = now
             self._moved[dev.id] = True
         self._reported[dev.id] = pos                     # 0-255 position -> feeds convergence
-        brightness = round(100 - pos * 100 / 255)        # Indigo brightness: 100 = open
+        brightness = self._pct(pos)                      # the ONE output conversion: 0-255 byte -> Indigo %
         dev.updateStateOnServer("brightnessLevel", brightness, uiValue="%d%%" % brightness)
-        dev.updateStateOnServer("positionPercent", round(pos * 100 / 255))
+        dev.updateStateOnServer("positionPercent", 100 - brightness)
         target = self._target.get(dev.id)
         if target is not None and abs(pos - target) > self.POS_TOL:
             win = "moving"                               # command outstanding, not there yet

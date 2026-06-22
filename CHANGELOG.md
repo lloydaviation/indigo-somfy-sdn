@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.0.3 — 2026-06-21
+
+Bug fix: lowering or setting a partial position could drive a shade back the wrong way.
+
+### Fixed
+- **Reissue-on-no-motion sent a corrupted target.** Closed-loop convergence stores the target in
+  0–255 wire units, but the stall-reissue path re-scaled it as a 0–100 percent (`target × 255 / 100`),
+  which overflowed and wrapped — a *close* (255) came back out as 138 (~46% open). A shade that didn't
+  reach its target on the first command was then driven the wrong way (the "multiple up commands" seen
+  while lowering). Raising was unaffected (0 maps to 0). The reissue now sends the stored 0–255 target
+  unchanged — identical to the original command.
+- **Motion detection hardened.** Convergence now counts a change in *reported position* as motion, not
+  only the reverse-engineered encoder-pulse field, so a shade still travelling toward its target is no
+  longer mistaken for "stalled" and reissued early.
+
+### Changed
+- **Internal cleanup.** Position state and all control logic now use the 0–255 wire byte throughout;
+  percent is converted only at the Indigo boundary (one helper in, one out). This removes the
+  dual-representation that let the reissue bug exist in the first place.
+
 ## 1.0.2 — 2026-06-21
 
 Serial-link resilience: the bus recovers from USB/serial drops on its own, tracks a reconnect
